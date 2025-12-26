@@ -1,0 +1,49 @@
+name: da
+
+services:
+
+    postgres:
+      image: postgres:16
+      restart: always
+      environment:
+        POSTGRES_DB: redash
+        POSTGRES_USER: redash
+        POSTGRES_PASSWORD: redash
+      volumes:
+        - ./dumps/main.sql:/docker-entrypoint-initdb.d/main.sql
+        - ./dumps:/dumps
+        - ./db_data:/var/lib/postgresql/data
+
+    redis:
+      image: redis:7
+      restart: always
+
+    server:
+      image: redash/redash:latest
+      command: server
+      depends_on:
+        - postgres
+        - redis
+      environment:
+        REDASH_DATABASE_URL: postgres://redash:redash@postgres:5432/redash
+        REDASH_REDIS_URL: redis://redis:6379/0
+        REDASH_SECRET_KEY: secret-key
+        REDASH_WEB_WORKERS: 4
+      ports:
+        - "8052:5000"
+      restart: always
+
+    worker:
+      image: redash/redash:latest
+      command: worker
+      depends_on:
+        - server
+      environment:
+        REDASH_DATABASE_URL: postgres://redash:redash@postgres:5432/redash
+        REDASH_REDIS_URL: redis://redis:6379/0
+        REDASH_SECRET_KEY: secret-key
+      restart: always
+
+volumes:
+    data:
+        driver: local
