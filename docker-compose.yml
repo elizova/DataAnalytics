@@ -1,17 +1,17 @@
 name: da
 
 services:
-
-    postgres:
+    db:
       image: postgres:16
       restart: always
       environment:
-        POSTGRES_DB: redash
-        POSTGRES_USER: redash
-        POSTGRES_PASSWORD: redash
+        POSTGRES_DB: postgres
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: postgres
       volumes:
-        - ./dumps/main.sql:/docker-entrypoint-initdb.d/main.sql
+        - ./db_init:/docker-entrypoint-initdb.d
         - ./dumps:/dumps
+        - ./redash_dumps:/redash_dumps
         - ./db_data:/var/lib/postgresql/data
 
     redis:
@@ -22,10 +22,10 @@ services:
       image: redash/redash:latest
       command: server
       depends_on:
-        - postgres
+        - db
         - redis
       environment:
-        REDASH_DATABASE_URL: postgres://redash:redash@postgres:5432/redash
+        REDASH_DATABASE_URL: postgresql://redash:redash@db:5432/redash
         REDASH_REDIS_URL: redis://redis:6379/0
         REDASH_SECRET_KEY: secret-key
         REDASH_WEB_WORKERS: 4
@@ -39,10 +39,29 @@ services:
       depends_on:
         - server
       environment:
-        REDASH_DATABASE_URL: postgres://redash:redash@postgres:5432/redash
+        REDASH_DATABASE_URL: postgresql://redash:redash@db:5432/redash
         REDASH_REDIS_URL: redis://redis:6379/0
         REDASH_SECRET_KEY: secret-key
       restart: always
+    
+    api:
+      links:
+        - db
+      image: api
+      restart: no
+      environment:
+        DB_NAME: postgres
+        DB_PORT: 5432
+        DB_PASS: postgres
+        DB_USER: postgres
+        DB_HOST: db
+      build: ./generator
+      logging:
+        driver: "json-file"
+        options:
+          max-size: "10m"
+          max-file: "10"
+      command: python main.py
 
 volumes:
     data:

@@ -3,6 +3,7 @@
 serv_pass.txt
 
 db_data/
+redash_data/
 *.jpg
 *.xlsx
 *.python
