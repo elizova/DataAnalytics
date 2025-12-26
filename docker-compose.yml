@@ -44,10 +44,9 @@ services:
         REDASH_SECRET_KEY: secret-key
       restart: always
     
-    api:
+    gen:
       links:
         - db
-      image: api
       restart: no
       environment:
         DB_NAME: postgres
@@ -61,7 +60,7 @@ services:
         options:
           max-size: "10m"
           max-file: "10"
-      command: python main.py
+      command: python -u main.py
 
 volumes:
     data:

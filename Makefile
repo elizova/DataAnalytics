@@ -1,29 +1,44 @@
 start:
 	docker compose up -d
 	docker compose run --rm server create_db
+	docker compose exec -w /core gen python -m alembic upgrade head
+
+rebuild-gen:
+	docker rm da-gen-1 -f
+	docker image rm da-gen -f
+	docker compose up gen -d
+
+stop-gen:
+	docker compose pause gen
+
+continue-gen:
+	docker compose unpause gen
+
+update-gen:
+	docker compose exec -w /core gen rm -r src
+	docker compose cp ./generator/src gen:core
 
 update-db:
-	docker compose -f docker-compose.yml exec -w /core api python -m alembic upgrade head
+	docker compose exec -w /core gen python -m alembic upgrade head
 
 update-pkgs:
-	docker compose -f docker-compose.yml cp ./generator/requirements.txt generator:/core
-	docker compose -f docker-compose.yml exec -w /generator api pip install -r requirements.txt
-	docker compose -f docker-compose.yml restart generator
+	docker compose cp ./generator/requirements.txt gen:/core
+	docker compose exec -w /core gen pip install -r requirements.txt
+	docker compose restart gen
 
 new-migr:
-	docker compose -f docker-compose.yml cp ./generator/database api:/core/src
-	docker compose -f docker-compose.yml exec -w /generator api python -m alembic revision --autogenerate -m "$(name)"
-	docker compose -f docker-compose.yml cp api:/core/database/migrations/versions ./generator/database/migrations
+	docker compose exec -w /core gen python -m alembic revision --autogenerate -m "$(name)"
+	docker compose cp gen:/core/src/migrations/versions ./generator/src/migrations
 
 see-db:
-	docker compose -f docker-compose.yml exec db psql -U postgres
+	docker compose exec db psql -U postgres
 
 see-db-redash:
-	docker compose -f docker-compose.yml exec db psql -U redash -d redash
+	docker compose exec db psql -U redash -d redash
 
 see-gen:
-	docker compose -f docker-compose.yml logs -f generator --since $(time)
+	docker compose logs -f gen --since $(time)
 
 dump:
-	docker compose -f docker-compose.yml exec db sh -c 'pg_dump --username=postgres -d postgres > /dumps/$$(date +"%Y-%m-%d_%H-%M-%S").dump'
-	docker compose -f docker-compose.yml exec db sh -c 'pg_dump --username=postgres -d redash > /redash_dumps/$$(date +"%Y-%m-%d_%H-%M-%S").dump'
+	docker compose exec db sh -c 'pg_dump --username=postgres -d postgres > /dumps/$$(date +"%Y-%m-%d_%H-%M-%S").dump'
+	docker compose exec db sh -c 'pg_dump --username=postgres -d redash > /redash_dumps/$$(date +"%Y-%m-%d_%H-%M-%S").dump'
