@@ -8,6 +8,8 @@ services:
         POSTGRES_DB: postgres
         POSTGRES_USER: postgres
         POSTGRES_PASSWORD: postgres
+      ports:
+        - "8053:5432"
       volumes:
         - ./db_init:/docker-entrypoint-initdb.d
         - ./dumps:/dumps
