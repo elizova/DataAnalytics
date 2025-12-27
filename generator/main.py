@@ -1,10 +1,10 @@
 import asyncio
 import math
 import random
-from datetime import datetime, timezone
-from typing import List
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from src.database.database import get_session
 from src.database.models import WeatherMeasurementOrm, WeatherStationOrm
 
@@ -79,7 +79,7 @@ def _condition(prec_mm: float, wind_ms: float, humidity: float) -> str:
         return "rain"
     if humidity > 85 and prec_mm > 0.5:
         return "drizzle"
-    if wind_ms > 15:
+    if wind_ms > 8:
         return "windy"
     return "clear"
 
@@ -114,27 +114,33 @@ async def get_stations():
 
 async def generate_measurements(
     stations: List[WeatherStationOrm],
-    t: float,
+    measured_at: datetime,
 ):
     async with get_session() as session:
-        now = datetime.now(timezone.utc)
         rows = []
+
+        seconds_in_day = (
+            measured_at.hour * 3600
+            + measured_at.minute * 60
+            + measured_at.second
+        )
+
+        diurnal_phase = (seconds_in_day / (24 * 3600)) * 2 * math.pi
+
         for st in stations:
             nearest_lat_key = min(
                 base_temp_by_lat.keys(), key=lambda k: abs(k - st.latitude)
             )
             base_temp = base_temp_by_lat[nearest_lat_key]
 
-            diurnal = 5.0 * math.sin(
-                (t % (24 * 3600)) / (24 * 3600) * 2 * math.pi
-            )
+            diurnal = 5.0 * math.sin(diurnal_phase)
             temp = base_temp + diurnal + random.uniform(-2.5, 2.5)
-
+            
             humidity = max(
                 20.0, min(100.0, 70.0 + random.uniform(-20.0, 20.0))
             )
             pressure = 1013.0 + random.uniform(-15.0, 15.0)
-            wind_speed = max(0.0, random.gauss(5.0, 2.0))
+            wind_speed = max(0.0, random.gauss(5.0, 5.0))
             wind_dir = int(random.uniform(0, 360))
             precipitation = (
                 max(0.0, random.gauss(0.3, 0.5)) if humidity > 75 else 0.0
@@ -144,7 +150,7 @@ async def generate_measurements(
             rows.append(
                 WeatherMeasurementOrm(
                     station_id=st.id,
-                    measured_at=now,
+                    measured_at=measured_at,
                     temperature_c=temp,
                     humidity_pct=humidity,
                     pressure_hpa=pressure,
@@ -161,24 +167,92 @@ async def generate_measurements(
         except Exception:
             await session.rollback()
 
-        print(f"added {len(rows)} rows")
+        print(f"{datetime.now()}: added {len(rows)} rows at {measured_at}")
+
+
+
+async def get_first_measured_since(since_ts: datetime) -> Optional[datetime]:
+    async with get_session() as session:
+        result = await session.execute(
+            select(func.min(WeatherMeasurementOrm.measured_at)).where(
+                WeatherMeasurementOrm.measured_at >= since_ts
+            )
+        )
+        return result.scalar_one_or_none()
+
+
+async def backfill(
+    stations: List[WeatherStationOrm],
+    start_ts: datetime,
+    end_ts: datetime,
+    step_seconds: int = 3600,
+):
+    ts = start_ts
+    added = 0
+    ts = ts.replace(minute=0, second=0, microsecond=0)
+    end_ts = end_ts.replace(minute=0, second=0, microsecond=0)
+    
+    while ts <= end_ts:
+        await generate_measurements(stations=stations, measured_at=ts)
+        added += 1
+        ts += timedelta(seconds=step_seconds)
+        
+    print(
+        f"Backfill complete: {added} steps from {start_ts} to {end_ts} (step={step_seconds}s)"
+    )
 
 
 async def main():
+    # ожидаем применения миграций
     await wait_for_migrations()
-
+    
+    # получаем (или заодно создаем в бд) станции
     stations = await get_stations()
-    t = 0.0
+    
+    # определяем периодичность создания записей
+    real_time_step_seconds = 1
+    
+    # определяем количество часов назад для заполнения данными
+    backfill_hours = 1488
 
-    while True:
-        await generate_measurements(
+    now_ts = datetime.now(timezone.utc).replace(microsecond=0)
+
+    # определяем временной промежуток для backfill
+    start = (now_ts - timedelta(hours=backfill_hours)).replace(
+        minute=0, second=0, microsecond=0,
+    )
+    end = now_ts.replace(minute=0, second=0, microsecond=0)
+
+    # заполнение данных в прошлом
+    try:
+        earliest_in_window = await get_first_measured_since(start)
+    except Exception:
+        earliest_in_window = None
+
+    should_backfill = (
+        earliest_in_window is None
+        or earliest_in_window.replace(minute=0, second=0, microsecond=0)
+        > start
+    )
+
+    if should_backfill and start <= end:
+        await backfill(
             stations=stations,
-            t=t,
+            start_ts=start,
+            end_ts=end,
+            step_seconds=3600,
         )
 
-        t += 1
-        await asyncio.sleep(1)
-
+    next_ts = now_ts
+    
+    # генерация данных с заданной периодичностью
+    while True:
+        await generate_measurements(stations=stations, measured_at=next_ts)
+        next_ts += timedelta(seconds=real_time_step_seconds)
+        sleep_for = max(
+            0.0, (next_ts - datetime.now(timezone.utc)).total_seconds()
+        )
+        await asyncio.sleep(min(sleep_for, real_time_step_seconds))
 
 if __name__ == "__main__":
     asyncio.run(main())

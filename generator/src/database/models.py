@@ -1,6 +1,5 @@
 from sqlalchemy import (
     Column,
-    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -44,32 +43,5 @@ class WeatherMeasurementOrm(base):
     __table_args__ = (
         Index(
             "ix_weather_measurement_station_time", "station_id", "measured_at"
-        ),
-    )
-
-
-class WeatherDailySummaryOrm(base):
-    __tablename__ = "weather_daily_summary"
-
-    id = Column(Integer, primary_key=True)
-    station_id = Column(
-        Integer,
-        ForeignKey("weather_station.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    date = Column(Date, nullable=False)
-
-    temp_min_c = Column(Float, nullable=False)
-    temp_max_c = Column(Float, nullable=False)
-    temp_avg_c = Column(Float, nullable=False)
-    precipitation_mm_total = Column(Float, nullable=False)
-    wind_speed_avg_ms = Column(Float, nullable=False)
-
-    __table_args__ = (
-        Index(
-            "ix_weather_daily_summary_station_date",
-            "station_id",
-            "date",
-            unique=True,
         ),
     )
